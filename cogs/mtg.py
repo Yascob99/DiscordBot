@@ -8,6 +8,7 @@ import difflib
 import sys
 import aiohttp
 from PIL import Image
+from io import BytesIO, StringIO
 
 class MTG:
 	"""Fetch info about a MTG card"""
@@ -15,6 +16,8 @@ class MTG:
 	def __init__(self, bot):
 		self.bot = bot
 		self.cards = dataIO.load_json('data/mtg/cards.json')['cards']
+		self.symbols = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "100","1000000", "B", "C", "G", "R", "U", "W", "X", "BP", "GP", "RP", "UP", "WP", "BG", "BR", "UB", "WB", "RG", "GU", "GW", "UR", "RW", "WU", "SNOW", "HALFB", "HALFG", "HALFR", "HALFU", "HALFW", "INFINITY"]
+		
 		
 	async def _update_sets(self):
 		url = "https://api.magicthegathering.io/v1/sets"
@@ -60,7 +63,7 @@ class MTG:
 
 
 	@commands.command(pass_context=True, no_pm=False, name='MTG', aliases=['mtg', 'Mtg'])
-	async def _MTG(self, ctx, *card: str):
+	async def _mtg(self, ctx, *card: str):
 		"""Searches for named MTG Card"""
 		if len(card) > 1:
 			card = '"' + " ".join(card) + '"'
@@ -84,25 +87,50 @@ class MTG:
 		else:
 			message = '`A card called '+ card + ' was not found.`'
 			await self.bot.say(message)
+			
+	@commands.command(pass_context=True, no_pm=False, name='Mana', aliases=['mana'])
+	async def _mana(self, ctx ,*, mana):
+		"""Creates and outputs the given mana combo"""
+		mana_symbols = mana.split(" ")
+		symbols = []
+		for symbol in mana_symbols:
+			symbol = symbol.upper()
+			print ([symbol])
+			if (symbol in self.symbols):
+				symbols.append(symbol)
+			elif len(symbol) == 2 and symbol[::-1] in self.symbols:
+				symbols.append(symbol[::-1])
+		print (symbols)
+		if len(symbols) != 0:
+			mana_cost = "{" + "}{".join(symbols) + "}"
+			image = await self._generate_mana_cost(mana_cost)
+			if os.path.isfile(image):
+				await self.bot.send_file(ctx.message.channel, open(image, "rb"))
+			else:
+				self.bot.say("Something went terribly wrong.")
+		else:
+			self.bot.say("There were no valid symbols.")
+		
+		
+		
 
 	async def _generate_mana_cost(self, mana_cost):
 		generated = "data/mtg/generated/" + mana_cost + ".png"
 		if not os.path.isfile(generated):
 			cost = mana_cost.replace("{", "").rstrip("}").split("}")
-			print (cost)
 			images = []
 			for part in cost:
 				part = Image.open("data/mtg/mana/" + part + ".png")
 				images.append(part)
-			w = sum(i.size[0] for i in images) + 20 * (len(images) - 1)
-			mh = 600
+			w = sum(i.size[0] for i in images) + 2 * (len(images) - 1)
+			mh = 75
 
-			result = Image.new("RGBA", (w, mh), (255,255,255))
+			result = Image.new("RGBA", (w, mh))
 
 			x = 0
 			for i in images:
 				result.paste(i, (x, 0))
-				x += i.size[0] + 20
+				x += i.size[0] + 2
 
 			result.save("data/mtg/generated/" + mana_cost + ".png")
 			
@@ -150,14 +178,37 @@ class MTG:
 			match = cards[0]
 			cards = []
 		return match, cards
+		
+	async def _update_mana_symbols(self):
+		payload = {}
+		list = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "1000000","B", "C", "G", "R", "U", "W", "X", "BP", "GP", "RP", "UP", "WP", "BG", "BR", "UB", "WB", "RG", "GU", "GW", "UR", "RW", "WU", "SNOW"]
+		url = "http://gatherer.wizards.com/Handlers/Image.ashx?"
+		conn = aiohttp.TCPConnector(verify_ssl=False)
+		session = aiohttp.ClientSession(connector=conn)
+		headers = {'user-agent': 'Red-cog/1.0'}
+		for symbol in list:
+			payload["name"] = symbol
+			payload["type"] = "symbol"
+			payload["size"] = "large"
+			resize = True
+			if "P" in symbol or "C" in symbol:
+				payload["size"] = "medium"
+			async with session.get(url ,params=payload,headers=headers) as r:
+				data = await r.read()
+				print(symbol)
+				stream = BytesIO(data)
+				img = Image.open(stream)
+				img = img.resize((25,25), Image.LANCZOS)
+				img.save("mtg/data/mtg/mana/" + symbol + ".png")
 
 
 	@commands.command(no_pm=True, name='MTGUpdate', aliases=['MTGU', 'mtgu', "MtgU", "Mtgu"])
 	async def _update(self):
-		"""Updates the list of MTG cards"""
+		"""Updates the list of MTG cards, and mana symbols"""
 		try:
 			await self._update_cards()
-			message = 'Card list updated.'
+			await self._update_mana_symbols()
+			message = 'Card list  and mana symbols updated.'
 		except Exception as error:
 			message = 'Could not update. Check console for more information.'
 			print(error)
@@ -189,7 +240,10 @@ def check_file():
 	if not dataIO.is_valid_json(f):
 		print('Creating default cards.json...')
 		dataIO.save_json(f, data)
-
+		
+	
+		session.close()
+		
 def setup(bot):
 	check_folder()
 	check_file()
